@@ -37,6 +37,143 @@ const Home: NextPage = () => {
     },
   ];
 
+  const fetchRoute = async (): Promise<any> => {
+    let data;
+    try {
+      const params = new URLSearchParams({
+        fromChainId: chainId?.toString() || "",
+        toChainId: toChain.toString() || "",
+        fromTokenAddress: fromToken,
+        toTokenAddress: toToken,
+        fromAmount: fromAmount,
+        userAddress: address?.toString() || "",
+        recipient: address?.toString() || "",
+        routeType: "Value",
+      });
+
+      const response = await fetch(`/api/quote?${params.toString()}`, {
+        method: "GET",
+        headers: {
+          "Content-Type": "application/json",
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error("Network response was not ok");
+      }
+
+      data = await response.json();
+    } catch (error) {
+      console.error("Failed to fetch the route:", error);
+    }
+    const route = data.route;
+    setToAmount(route.outputValueInUsd);
+
+    return route;
+  };
+
+  const fetchRouteData = async (
+    route: any
+  ): Promise<{
+    routeTxData: any;
+    approvalData: any;
+  }> => {
+    let data;
+    let response;
+    let routeTxData;
+    let approvalData;
+    try {
+      response = await fetch(`/api/routeData`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ route: route }),
+      });
+
+      if (!response.ok) {
+        throw new Error("Network response was not ok");
+      }
+      if (response != undefined) {
+        data = await response.json();
+
+        routeTxData = data.responseInJson.result;
+        setRouteTxData(routeTxData);
+
+        approvalData = data.responseInJson.result.approvalData;
+      }
+    } catch (error) {
+      console.error("Failed to fetch the transaction data:", error);
+    }
+    return {
+      routeTxData: routeTxData,
+      approvalData: approvalData,
+    };
+  };
+
+  const approvalTx = async (res: any): Promise<any> => {
+    let response;
+    let s_approvalTxData;
+    let data;
+    try {
+      const params = new URLSearchParams({
+        chainId: chainId?.toString() || "",
+        owner: res.owner,
+        allowanceTarget: res.allowanceTarget,
+        tokenAddress: res.approvalTokenAddress,
+        amount: res.minimumApprovalAmount,
+      });
+
+      response = await fetch(
+        `/api/generateApprovalTxData?${params.toString()}`,
+        {
+          method: "GET",
+          headers: {
+            "Content-Type": "application/json",
+          },
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error("Network response was not ok");
+      }
+
+      if (response != undefined) {
+        data = await response.json();
+        s_approvalTxData = data.approvalTxData;
+      }
+    } catch (error) {
+      console.error("Failed to fetch the approval transaction data:", error);
+    }
+    setApprovalTxData(s_approvalTxData);
+
+    return s_approvalTxData;
+  };
+
+  const swap = async () => {
+    await fetchRoute().then(async (route) => {
+      await fetchRouteData(route).then(async (response) => {
+        await approvalTx(response.approvalData);
+      });
+    });
+    console.log("Data Fetched.. Move to next step");
+  };
+
+  const sendApprovalTx = () => {
+    console.log("Sending Approval Tx Data");
+    sendTransaction({
+      to: apporvalTxData.to,
+      data: apporvalTxData.data,
+    });
+  };
+
+  const sendBridgeTx = () => {
+    sendTransaction({
+      to: routeTxData.txTarget,
+      data: routeTxData.txData,
+    });
+  };
+
   return (
     <div className={styles.container}>
       <main className={styles.main}>
@@ -119,7 +256,7 @@ const Home: NextPage = () => {
           <button
             type="button"
             onClick={() => {
-              // swap();
+              swap();
             }}
             className={styles.swapButton}
           >
@@ -137,18 +274,14 @@ const Home: NextPage = () => {
         </form>
         <button
           type="button"
-          onClick={() => {
-            // sendApproveTx();
-          }}
+          onClick={sendApprovalTx}
           className={styles.swapButton + " " + styles.approvalButton}
         >
           Send Approval Tx
         </button>
         <button
           type="button"
-          onClick={() => {
-            // sendBridgeTx();
-          }}
+          onClick={sendBridgeTx}
           className={styles.swapButton}
         >
           Send Bridge Tx
