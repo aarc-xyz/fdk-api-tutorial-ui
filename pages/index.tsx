@@ -11,10 +11,9 @@ const Home: NextPage = () => {
   const [toChain, setToChain] = useState(0);
   const [toToken, setToToken] = useState("");
   const [fromAmount, setFromAmount] = useState("");
-  const [toAmount, setToAmount] = useState("");
 
-  const [routeTxData, setRouteTxData] = useState<any>(null);
-  const [apporvalTxData, setApprovalTxData] = useState<any>(null);
+  const [apporvalTxData, setApprovalTxData] = useState<any>();
+  const [executionTxData, setExecutionTxData] = useState<any>();
 
   const chains = [
     { id: 56, name: "Binance Smart Chain" },
@@ -37,140 +36,80 @@ const Home: NextPage = () => {
     },
   ];
 
-  const fetchRoute = async (): Promise<any> => {
-    let data;
+  const fetchDepositCalldata = async (): Promise<any> => {
+    let response;
+    let responseInJson;
+    let finalResponse = {
+      success: false,
+      data: {
+        approvalTxs: [],
+        executionTxs: [],
+      }
+    };
+
     try {
       const params = new URLSearchParams({
         fromChainId: chainId?.toString() || "",
         toChainId: toChain.toString() || "",
         fromTokenAddress: fromToken,
         toTokenAddress: toToken,
-        fromAmount: fromAmount,
+        fromAmount: (Number(fromAmount) * 1000000).toString(),
         userAddress: address?.toString() || "",
         recipient: address?.toString() || "",
         routeType: "Value",
       });
-
-      const response = await fetch(`/api/quote?${params.toString()}`, {
+      response = await fetch(`/api?${params.toString()}`, {
         method: "GET",
         headers: {
           "Content-Type": "application/json",
         },
       });
-
-      if (!response.ok) {
-        throw new Error("Network response was not ok");
-      }
-
-      data = await response.json();
-    } catch (error) {
-      console.error("Failed to fetch the route:", error);
     }
-    const route = data.route;
-    setToAmount(route.outputValueInUsd);
-
-    return route;
-  };
-
-  const fetchRouteData = async (
-    route: any
-  ): Promise<{
-    routeTxData: any;
-    approvalData: any;
-  }> => {
-    let data;
-    let response;
-    let routeTxData;
-    let approvalData;
-    try {
-      response = await fetch(`/api/routeData`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ route: route }),
-      });
-
-      if (!response.ok) {
-        throw new Error("Network response was not ok");
-      }
-      if (response != undefined) {
-        data = await response.json();
-
-        routeTxData = data.responseInJson.result;
-        setRouteTxData(routeTxData);
-
-        approvalData = data.responseInJson.result.approvalData;
-      }
-    } catch (error) {
-      console.error("Failed to fetch the transaction data:", error);
+    catch (error) {
+      console.error("Failed to fetch the deposit calldata:", error);
     }
-    return {
-      routeTxData: routeTxData,
-      approvalData: approvalData,
-    };
-  };
 
-  const approvalTx = async (res: any): Promise<any> => {
-    let response;
-    let s_approvalTxData;
-    let data;
     try {
-      const params = new URLSearchParams({
-        chainId: chainId?.toString() || "",
-        owner: res.owner,
-        allowanceTarget: res.allowanceTarget,
-        tokenAddress: res.approvalTokenAddress,
-        amount: res.minimumApprovalAmount,
-      });
+      responseInJson = await response?.json();
 
-      response = await fetch(
-        `/api/generateApprovalTxData?${params.toString()}`,
-        {
-          method: "GET",
-          headers: {
-            "Content-Type": "application/json",
+      if (!responseInJson.success) {
+        throw new Error("API response was not successful");
+      } else {
+        finalResponse = {
+          success: true,
+          data: {
+            approvalTxs: responseInJson.data.approvalTxs,
+            executionTxs: responseInJson.data.executionTxs,
           },
-        }
-      );
-
-      if (!response.ok) {
-        throw new Error("Network response was not ok");
-      }
-
-      if (response != undefined) {
-        data = await response.json();
-        s_approvalTxData = data.approvalTxData;
+        };
       }
     } catch (error) {
-      console.error("Failed to fetch the approval transaction data:", error);
+      console.error("Failed to parse the response:", error);
     }
-    setApprovalTxData(s_approvalTxData);
-
-    return s_approvalTxData;
+    return finalResponse;
   };
+
 
   const swap = async () => {
-    await fetchRoute().then(async (route) => {
-      await fetchRouteData(route).then(async (response) => {
-        await approvalTx(response.approvalData);
-      });
-    });
-    console.log("Data Fetched.. Move to next step");
+    const calldata = await fetchDepositCalldata();
+
+    setApprovalTxData(calldata.data.approvalTxs[0]);
+    setExecutionTxData(calldata.data.executionTxs[0]);
+
   };
 
   const sendApprovalTx = () => {
     console.log("Sending Approval Tx Data");
     sendTransaction({
-      to: apporvalTxData.to,
-      data: apporvalTxData.data,
+      to: `0x${(apporvalTxData?.txTarget)?.substring(2)}`,
+      data: `0x${(apporvalTxData?.txData)?.substring(2)}`,
     });
   };
 
-  const sendBridgeTx = () => {
+  const sendExecutionTx = () => {
     sendTransaction({
-      to: routeTxData.txTarget,
-      data: routeTxData.txData,
+      to: `0x${(executionTxData?.txTarget)?.substring(2)}`,
+      data: `0x${(executionTxData?.txData)?.substring(2)}`,
     });
   };
 
@@ -208,7 +147,7 @@ const Home: NextPage = () => {
               type="number"
               value={fromAmount}
               onChange={(e) => {
-                setFromAmount((parseInt(e.target.value) * 1000000).toString());
+                setFromAmount(e.target.value);
               }}
               placeholder="From Amount"
               required
@@ -260,17 +199,8 @@ const Home: NextPage = () => {
             }}
             className={styles.swapButton}
           >
-            Fetch Route
+            Fetch Deposit Calldata
           </button>
-          <div className={styles.swapRow}>
-            {/* Display the calculated "To" amount. This field is read-only. */}
-            <input
-              type="text"
-              value={toAmount}
-              readOnly
-              placeholder="To Amount (Estimated)"
-            />
-          </div>
         </form>
         <button
           type="button"
@@ -281,7 +211,7 @@ const Home: NextPage = () => {
         </button>
         <button
           type="button"
-          onClick={sendBridgeTx}
+          onClick={sendExecutionTx}
           className={styles.swapButton}
         >
           Send Bridge Tx
